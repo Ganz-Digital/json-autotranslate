@@ -110,7 +110,7 @@ inconsistencies by passing the `--fix-inconsistencies` flag.
 
 ### Key-Based
 
-If you pass use the `keybased` option (`--type keybased`), this tool will use
+If you pass use the `key-based` option (`--type key-based`), this tool will use
 the source file's values as the basis of translations. Keys can be nested, the
 structure will be transferred over to the translated files as well.
 
@@ -138,6 +138,7 @@ As of this release, json-autotranslate offers five services:
   to translate strings)
 - **amazon-translate** (uses
   [Amazon Translate](https://aws.amazon.com/translate/) to translate strings)
+- **OpenAI** (uses gpt-4o and can take a context file path from the context option)
 - **manual** (allows you to translate strings manually by entering them into the
   CLI)
 - **dry-run** (outputs a list of strings that will be translated without
@@ -212,9 +213,10 @@ Azure account if you don't have one already and
 You'll get an API key soon after that which you can pass to json-autotranslate
 using the `-c` or `--config` flag.
 
-You can also provide a region by adding it to the config string after the API
-key, separated by a comma: `--config apiKey,region`. As of this version, the
-following regions are available:
+Unless you configure a global translator instance you will need to provide a
+region by adding it to the config string after the API key, separated by a
+comma: `--config apiKey,region`. As of this version, the following regions are
+available:
 
 > australiaeast, brazilsouth, canadacentral, centralindia, centralus,
 > centraluseuap, eastasia, eastus, eastus2, francecentral, japaneast, japanwest,
@@ -224,7 +226,8 @@ following regions are available:
 <sup><a href="https://docs.microsoft.com/en-us/azure/cognitive-services/translator/reference/v3-0-reference#authenticating-with-a-multi-service-resource">Reference</a></sup>
 
 As of now, the first 2M characters of translation per month are free. After that
-you'll have to pay \$10 per 1M characters that you translate.
+you'll have to pay \$10 per 1M characters that you translate. See their
+[pricing](https://azure.microsoft.com/en-us/pricing/details/cognitive-services/translator/)
 
 ### Amazon Translate
 
@@ -297,20 +300,26 @@ available matchers.
 
 ```
 Options:
-  -i, --input <inputDir>                        the directory containing language directories (default: ".")
-  -l, --source-language <sourceLang>            specify the source language (default: "en")
-  -t, --type <key-based|natural|auto>           specify the file structure type (default: "auto")
-  -s, --service <service>                       selects the service to be used for translation (default: "google-translate")
-  --list-services                               outputs a list of available services
-  -m, --matcher <matcher>                       selects the matcher to be used for interpolations (default: "icu")
-  -a, --with-arrays                             enables support for arrays in files, but removes support for keys named 0, 1, 2, etc.
-  --list-matchers                               outputs a list of available matchers
-  -c, --config <value>                          supply a config parameter (e.g. path to key file) to the translation service
-  -f, --fix-inconsistencies                     automatically fixes inconsistent key-value pairs by setting the value to the key
-  -d, --delete-unused-strings                   deletes strings in translation files that don't exist in the template
-  -h, --help                                    output usage information
-  --directory-structure <default|ngx-translate> the locale directory structure (default: "default")
-  --decode-escapes                              decodes escaped HTML entities like &#39; into normal UTF-8 characters
+  -i, --input <inputDir>                         the directory containing language directories (default: ".")
+  --exclude <exclude glob>                       exclude files matching the given glob pattern
+  --cache <cacheDir>                             set the cache directory (default: ".json-autotranslate-cache")
+  -l, --source-language <sourceLang>             specify the source language (default: "en")
+  -t, --type <key-based|natural|auto>            specify the file structure type (default: "auto")
+  -a, --with-arrays                              enables support for arrays in files, but removes support for keys named 0, 1, 2, etc.
+  -s, --service <service>                        selects the service to be used for translation (default: "google-translate")
+  -g, --glossaries [glossariesDir]               set the glossaries folder to be used by DeepL. Keep empty for automatic determination of matching glossary
+  -a, --appName <appName>                        specify the name of your app to distinguish DeepL glossaries (if sharing an API key between multiple projects) (default: "json-autotranslate")
+  --context <context>                            set the context that is used by DeepL for translations, for OpenAI it is the path to the json file containing the context for each key
+  --list-services                                outputs a list of available services
+  -m, --matcher <matcher>                        selects the matcher to be used for interpolations (default: "icu")
+  --list-matchers                                outputs a list of available matchers
+  -c, --config <value>                           supply a config parameter (e.g. path to key file) to the translation service
+  -f, --fix-inconsistencies                      automatically fixes inconsistent key-value pairs by setting the value to the key
+  -d, --delete-unused-strings                    deletes strings in translation files that don't exist in the template
+  --directory-structure <default|ngx-translate>  the locale directory structure
+  --decode-escapes                               decodes escaped HTML entities like &#39; into normal UTF-8 characters
+  -o, --overwrite                                overwrite already present translations
+  -h, --help                                     display help for command
 ```
 
 ## Contributing

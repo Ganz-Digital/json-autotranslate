@@ -13,19 +13,20 @@ import {
 export class DeepL implements TranslationService {
   public name: string;
   private apiEndpoint: string;
-  private glossariesDir: string;
-  private appName: string;
-  private context: string;
-  private apiKey: string;
+  private glossariesDir?: string;
+  private automaticGlossary?: boolean;
+  private appName?: string;
+  private context?: string;
+  private apiKey?: string;
   /**
    * Number to tokens to translate at once
    */
-  private batchSize: number = 1000;
-  private supportedLanguages: Set<string>;
-  private formalityLanguages: Set<string>;
-  private interpolationMatcher: Matcher;
-  private decodeEscapes: boolean;
-  private formality: 'default' | 'less' | 'more';
+  private batchSize = 1000;
+  private supportedLanguages?: Set<string>;
+  private formalityLanguages?: Set<string>;
+  private interpolationMatcher?: Matcher;
+  private decodeEscapes?: boolean;
+  private formality?: 'default' | 'less' | 'more';
 
   /**
    * Creates a new instance of the DeepL translation service
@@ -45,7 +46,7 @@ export class DeepL implements TranslationService {
     config?: string,
     interpolationMatcher?: Matcher,
     decodeEscapes?: boolean,
-    glossariesDir?: string,
+    glossariesDir?: string | boolean,
     appName?: string,
     context?: string,
   ) {
@@ -62,12 +63,18 @@ export class DeepL implements TranslationService {
     this.supportedLanguages = this.formatLanguages(languages);
     this.formalityLanguages = this.getFormalityLanguages(languages);
     this.decodeEscapes = decodeEscapes;
-    this.glossariesDir = glossariesDir;
+    this.glossariesDir =
+      typeof glossariesDir === 'string' ? glossariesDir : undefined;
+    this.automaticGlossary = glossariesDir === true;
     this.appName = appName;
     this.context = context;
   }
 
   async fetchLanguages() {
+    if (!this.apiKey) {
+      throw new Error('Missing API key');
+    }
+
     const url = new URL(`${this.apiEndpoint}/languages`);
     url.searchParams.append('auth_key', this.apiKey);
     url.searchParams.append('type', 'target');
@@ -83,6 +90,7 @@ export class DeepL implements TranslationService {
       name: string;
       supports_formality: boolean;
     }> = await response.json();
+
     return languages;
   }
 
@@ -114,11 +122,11 @@ export class DeepL implements TranslationService {
   }
 
   supportsLanguage(language: string) {
-    return this.supportedLanguages.has(language.toLowerCase());
+    return !!this.supportedLanguages?.has(language.toLowerCase());
   }
 
   supportsFormality(language: string) {
-    return this.formalityLanguages.has(language.toLowerCase());
+    return !!this.formalityLanguages?.has(language.toLowerCase());
   }
 
   async translateStrings(
@@ -139,38 +147,10 @@ export class DeepL implements TranslationService {
   }
 
   /**
-   * Delete existing glossaries of this app and re-create them. (DeepL does not allow editing glossaries).
+   * Delete a glossary.
    */
-  async syncGlossaries() {
-    // Delete all existing glossaries of this app:
-    const existingGlossaries = await this.listGlossaries().then((glossaries) =>
-      glossaries.filter((g) => g.name === this.appName),
-    );
-    if (existingGlossaries.length > 0) {
-      for (const glossary of existingGlossaries) {
-        await this.deleteGlossary(glossary.glossary_id);
-        console.log(`Deleting glossary ${glossary.glossary_id}`);
-      }
-    }
-    // Add all glossaries found in glossaries directory:
-    const responses: DeepLGlossary[] = [];
-    const files = fs.readdirSync(this.glossariesDir);
-    for (const file of files) {
-      const filePath = path.join(this.glossariesDir, file);
-      if (fs.statSync(filePath).isFile() && path.extname(file) === '.json') {
-        const response = await this.createGlossaryFromFile(filePath);
-        if (response) {
-          responses.push(response);
-          console.log(`Glossary added for file: ${file}`);
-        } else {
-          console.error(`Failed to add glossary for file: ${file}`);
-        }
-      }
-    }
-    return responses;
-  }
-
   async deleteGlossary(glossary_id: string) {
+    console.log(`Deleting glossary ${glossary_id}`);
     const response = await fetch(
       `${this.apiEndpoint}/glossaries/${glossary_id}`,
       {
@@ -213,6 +193,7 @@ export class DeepL implements TranslationService {
     // Extract source and target language from the file name
     const fileName = path.basename(filePath, '.json');
     const [sourceLang, targetLang] = fileName.split('-');
+    console.log(`Creating ${sourceLang}-${targetLang} glossary`);
     const fileContent = fs.readFileSync(filePath, 'utf-8');
     // Create TSV file:
     let entries = '';
@@ -252,20 +233,27 @@ export class DeepL implements TranslationService {
     return glossary as DeepLGlossary;
   }
 
-  async getGlossary(from: string, to: string) {
-    const glossaries = await this.syncGlossaries();
-    const glossary = glossaries.find(
-      (g) =>
-        g.source_lang === from.toLowerCase() &&
-        g.target_lang === to.toLowerCase(),
-    );
-    if (!glossary) {
-      return null;
+  async getGlossary(from: string, to: string, recreate: boolean) {
+    const allGlossaries = await this.listGlossaries();
+    let glossary = allGlossaries
+      .filter((g) => (!!this.appName ? g.name === this.appName : true)) // Only of this app, if defined
+      .find(
+        (g) =>
+          g.source_lang === from.toLowerCase() &&
+          g.target_lang === to.toLowerCase(), // Only of this translation.
+      );
+
+    if (recreate && this.glossariesDir) {
+      if (glossary) {
+        await this.deleteGlossary(glossary.glossary_id);
+      }
+
+      // Add the glossary:
+      const filePath = path.join(this.glossariesDir, `${from}-${to}.json`);
+      glossary = await this.createGlossaryFromFile(filePath);
     }
-    if (!glossary.ready) {
-      throw new Error(`${from} -> ${to} glossary is not ready yet.`);
-    }
-    return glossary as DeepLGlossary;
+
+    return glossary;
   }
 
   async runTranslation(
@@ -291,9 +279,16 @@ export class DeepL implements TranslationService {
     };
 
     // Should a glossary be used?
-    if (this.glossariesDir) {
+    const hasGlossaryFile =
+      this.glossariesDir &&
+      fs.existsSync(path.join(this.glossariesDir, `${from}-${to}.json`));
+    if (hasGlossaryFile || this.automaticGlossary) {
       // Find the glossary that matches the source and target language:
-      const glossary = await this.getGlossary(from, to);
+      const glossary = await this.getGlossary(
+        from,
+        to,
+        !this.automaticGlossary,
+      );
       if (glossary) {
         // Add it to the options body:
         body['glossary_id'] = glossary.glossary_id;

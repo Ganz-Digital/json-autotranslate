@@ -30,6 +30,10 @@ commander
     '.',
   )
   .option(
+    '--exclude <exclude glob>',
+    'exclude files matching the given glob pattern',
+  )
+  .option(
     '--cache <cacheDir>',
     'set the cache directory',
     '.json-autotranslate-cache',
@@ -55,8 +59,8 @@ commander
     'google-translate',
   )
   .option(
-    '-g, --glossaries <glossariesDir>',
-    `set the glossaries folder to be used by DeepL`,
+    '-g, --glossaries [glossariesDir]',
+    `set the glossaries folder to be used by DeepL. Keep empty for automatic determination of matching glossary`,
   )
   .option(
     '-a, --appName <appName>',
@@ -65,7 +69,7 @@ commander
   )
   .option(
     '--context <context>',
-    `set the context that is used by DeepL for translations`,
+    `set the context that is used by DeepL for translations, for OpenAI it's the path to a JSON file`,
   )
   .option('--list-services', `outputs a list of available services`)
   .option(
@@ -94,10 +98,15 @@ commander
     '--decode-escapes',
     'decodes escaped HTML entities like &#39; into normal UTF-8 characters',
   )
+  .option(
+    '-o, --overwrite',
+    'overwrite existing translations instead of skipping them',
+  )
   .parse(process.argv);
 
 const translate = async (
   inputDir: string = '.',
+  exclude: string | undefined = undefined,
   cacheDir: string = '.json-autotranslate-cache',
   sourceLang: string = 'en',
   deleteUnusedStrings = false,
@@ -109,9 +118,10 @@ const translate = async (
   matcher: keyof typeof matcherMap = 'icu',
   decodeEscapes = false,
   config?: string,
-  glossariesDir?: string,
+  glossariesDir?: string | boolean,
   appName?: string,
   context?: string,
+  overwrite: boolean = false,
 ) => {
   const workingDir = path.resolve(process.cwd(), inputDir);
   const resolvedCacheDir = path.resolve(process.cwd(), cacheDir);
@@ -145,6 +155,7 @@ const translate = async (
 
   const templateFiles = loadTranslations(
     templateFilePath,
+    exclude,
     fileType,
     withArrays,
   );
@@ -297,6 +308,7 @@ const translate = async (
       dirStructure,
       deleteUnusedStrings,
       withArrays,
+      overwrite,
     );
 
     switch (dirStructure) {
@@ -412,6 +424,7 @@ if (commander.listMatchers) {
 
 translate(
   commander.input,
+  commander.exclude,
   commander.cache,
   commander.sourceLanguage,
   commander.deleteUnusedStrings,
@@ -426,6 +439,7 @@ translate(
   commander.glossaries,
   commander.appName,
   commander.context,
+  commander.overwrite,
 ).catch((e: Error) => {
   console.log();
   console.log(chalk.bgRed('An error has occurred:'));
@@ -445,6 +459,7 @@ function createTranslator(
   dirStructure: DirectoryStructure,
   deleteUnusedStrings: boolean,
   withArrays: boolean,
+  overwrite, 
 ) {
   return async (
     sourceFile: TranslatableFile,
@@ -472,7 +487,8 @@ function createTranslator(
       : [];
     const templateStrings = Object.keys(sourceFile.content);
     const stringsToTranslate = templateStrings
-      .filter((key) => !existingKeys.includes(key) || cacheDiff.includes(key))
+      .filter((key) => overwrite || !existingKeys.includes(key) || cacheDiff.includes(key) ||
+        (typeof sourceFile.content[key] == 'string' && !destinationFile?.content[key]))
       .map((key) => ({
         key,
         value: sourceFile.type === 'key-based' ? sourceFile.content[key] : key,
